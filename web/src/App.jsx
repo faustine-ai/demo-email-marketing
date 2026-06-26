@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useStore } from './lib/hooks.js';
-import { api } from './lib/store.js';
+import { api, connect, logout as doLogout, fetchMe, getToken, setToken, disconnect, setUnauthorizedHandler } from './lib/store.js';
 import { clockTime } from './lib/format.js';
+import { getTheme, applyTheme } from './lib/theme.js';
 import {
   IconPulse, IconCampaign, IconMailbox, IconAudience, IconTemplate, IconMenu, IconCheck,
+  IconSettings, IconSun, IconMoon, IconLogout, IconUser,
 } from './components/Icons.jsx';
 import CampaignDrawer from './components/CampaignDrawer.jsx';
 import Overview from './views/Overview.jsx';
@@ -11,6 +13,8 @@ import Campaigns from './views/Campaigns.jsx';
 import Mailboxes from './views/Mailboxes.jsx';
 import Audiences from './views/Audiences.jsx';
 import Templates from './views/Templates.jsx';
+import Settings from './views/Settings.jsx';
+import Login from './views/Login.jsx';
 
 const NAV = [
   { id: 'overview', label: 'Overview', icon: IconPulse },
@@ -18,15 +22,65 @@ const NAV = [
   { id: 'mailboxes', label: 'Mailboxes', icon: IconMailbox },
   { id: 'audiences', label: 'Audiences', icon: IconAudience },
   { id: 'templates', label: 'Templates', icon: IconTemplate },
+  { id: 'settings', label: 'Settings', icon: IconSettings },
 ];
 
 export default function App() {
+  // auth: 'pending' until we know, then a user object or null.
+  const [user, setUser] = useState(undefined);
+
+  // On boot, validate any token already in sessionStorage.
+  useEffect(() => {
+    let cancelled = false;
+    // A rejected/expired token anywhere (REST 401 or WS 4401) bounces to login.
+    setUnauthorizedHandler(() => {
+      setToken(null);
+      disconnect();
+      setUser(null);
+    });
+    (async () => {
+      if (!getToken()) {
+        setUser(null);
+        return;
+      }
+      const me = await fetchMe();
+      if (cancelled) return;
+      if (me) {
+        connect();
+        setUser(me);
+      } else {
+        setUser(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const onAuthed = useCallback((u) => {
+    connect();
+    setUser(u);
+  }, []);
+
+  if (user === undefined) return <div className="boot" />;
+  if (!user) return <Login onAuthed={onAuthed} />;
+  return <Console user={user} onLogout={() => { doLogout(); setUser(null); }} />;
+}
+
+function Console({ user, onLogout }) {
   const store = useStore();
   const [route, setRoute] = useState('overview');
   const [selectedCampaign, setSelectedCampaign] = useState(null);
   const [drawer, setDrawer] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [theme, setTheme] = useState(getTheme);
+
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    applyTheme(next);
+  };
 
   const toast = useCallback((msg) => {
     const id = Math.random().toString(36).slice(2);
@@ -60,7 +114,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <Rail route={route} go={go} counts={counts} connection={store.connection} clients={store.clients} open={railOpen} />
+      <Rail route={route} go={go} counts={counts} connection={store.connection} clients={store.clients} open={railOpen} user={user} onLogout={onLogout} />
 
       <div className="main">
         <header className="topbar">
@@ -73,6 +127,9 @@ export default function App() {
           </div>
           <div className="spacer" />
           <Telemetry sending={sending.length} liveRate={liveRate} />
+          <button className="icon-btn" onClick={toggleTheme} aria-label="Toggle theme" title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}>
+            {theme === 'dark' ? <IconSun /> : <IconMoon />}
+          </button>
         </header>
 
         <main className="view">
@@ -90,6 +147,7 @@ export default function App() {
           {route === 'mailboxes' && <Mailboxes store={store} api={api} toast={toast} />}
           {route === 'audiences' && <Audiences store={store} api={api} toast={toast} />}
           {route === 'templates' && <Templates store={store} api={api} toast={toast} />}
+          {route === 'settings' && <Settings store={store} api={api} toast={toast} />}
         </main>
       </div>
 
@@ -118,7 +176,7 @@ export default function App() {
   );
 }
 
-function Rail({ route, go, counts, connection, clients, open }) {
+function Rail({ route, go, counts, connection, clients, open, user, onLogout }) {
   const label = { open: 'Connected', connecting: 'Connecting…', closed: 'Reconnecting…' }[connection] || connection;
   return (
     <aside className={`rail${open ? ' open' : ''}`}>
@@ -147,13 +205,19 @@ function Rail({ route, go, counts, connection, clients, open }) {
       })}
 
       <div className="rail-foot">
+        <div className="user-row">
+          <span className="user-avatar"><IconUser style={{ width: 16, height: 16 }} /></span>
+          <div style={{ minWidth: 0 }}>
+            <div className="user-name">{user.name}</div>
+            <div className="user-handle">@{user.username}</div>
+          </div>
+          <button className="icon-btn" onClick={onLogout} title="Sign out" aria-label="Sign out">
+            <IconLogout />
+          </button>
+        </div>
         <div className={`conn ${connection}`}>
           <span className="dot" />
-          {label}
-        </div>
-        <div className="conn" style={{ paddingTop: 0 }}>
-          <span style={{ width: 8 }} />
-          {clients} session{clients === 1 ? '' : 's'} live
+          {label} · {clients} session{clients === 1 ? '' : 's'}
         </div>
       </div>
     </aside>

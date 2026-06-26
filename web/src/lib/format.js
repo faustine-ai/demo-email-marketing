@@ -11,7 +11,7 @@ export const STATUS = {
   draft: { label: 'Draft', color: 'var(--mist)' },
   scheduled: { label: 'Scheduled', color: 'var(--violet)' },
   sending: { label: 'Sending', color: 'var(--coral)' },
-  paused: { label: 'Paused', color: '#E0A23B' },
+  paused: { label: 'Paused', color: 'var(--amber)' },
   sent: { label: 'Sent', color: 'var(--mint)' },
 };
 

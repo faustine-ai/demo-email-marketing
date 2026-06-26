@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import DispatchStream from '../components/DispatchStream.jsx';
 import { StatusBadge, Meter } from '../components/ui.jsx';
-import { IconPlus, IconPlay, IconPause, IconClock, IconTrash, IconArrowLeft, IconChevronUp, IconChevronDown } from '../components/Icons.jsx';
+import {
+  IconPlus, IconPlay, IconPause, IconStop, IconClock, IconTrash, IconArrowLeft, IconChevronUp, IconChevronDown,
+} from '../components/Icons.jsx';
 import { num, compact, pct, ratio, relTime, clockTime, STATUS } from '../lib/format.js';
 
 export default function Campaigns({ store, api, selectedId, onSelect, onNew, toast }) {
@@ -10,10 +12,85 @@ export default function Campaigns({ store, api, selectedId, onSelect, onNew, toa
     if (!c) return <Empty onNew={onNew} onBack={() => onSelect(null)} missing />;
     return <CampaignDetail store={store} api={api} c={c} onBack={() => onSelect(null)} toast={toast} />;
   }
-  return <CampaignList store={store} onSelect={onSelect} onNew={onNew} />;
+  return <CampaignList store={store} api={api} onSelect={onSelect} onNew={onNew} toast={toast} />;
 }
 
-function CampaignList({ store, onSelect, onNew }) {
+// Shared play / pause / stop controls, used in both the list and the detail.
+// `compact` renders icon-only buttons for the table; otherwise labelled buttons.
+function CampaignControls({ c, api, toast, compact: iconOnly, onAfterDelete }) {
+  const [busy, setBusy] = useState(false);
+
+  async function act(fn, label, after) {
+    setBusy(true);
+    try {
+      await fn();
+      if (label) toast(label);
+      after?.();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const canPlay = c.status === 'draft' || c.status === 'scheduled' || c.status === 'paused';
+  const canPause = c.status === 'sending';
+  const canStop = c.status === 'sending' || c.status === 'paused' || c.status === 'scheduled';
+  const playLabel = c.status === 'paused' ? 'Resume' : c.status === 'scheduled' ? 'Launch now' : 'Launch';
+
+  if (iconOnly) {
+    return (
+      <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
+        {canPlay && (
+          <button className="icon-btn play" disabled={busy} title={playLabel} onClick={() => act(() => api.launchCampaign(c.id), c.status === 'paused' ? 'Dispatch resumed' : 'Dispatch started')}>
+            <IconPlay />
+          </button>
+        )}
+        {canPause && (
+          <button className="icon-btn" disabled={busy} title="Pause" onClick={() => act(() => api.pauseCampaign(c.id), 'Dispatch paused')}>
+            <IconPause />
+          </button>
+        )}
+        {canStop && (
+          <button className="icon-btn stop" disabled={busy} title="Stop" onClick={() => act(() => api.stopCampaign(c.id), 'Dispatch stopped')}>
+            <IconStop />
+          </button>
+        )}
+        {!canPlay && !canPause && !canStop && <span className="mono-tag">—</span>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="row" style={{ gap: 8 }}>
+      {canPlay && (
+        <button className="btn primary" disabled={busy} onClick={() => act(() => api.launchCampaign(c.id), c.status === 'paused' ? 'Dispatch resumed' : 'Dispatch started')}>
+          <IconPlay /> {playLabel}
+        </button>
+      )}
+      {canPause && (
+        <button className="btn" disabled={busy} onClick={() => act(() => api.pauseCampaign(c.id), 'Dispatch paused')}>
+          <IconPause /> Pause
+        </button>
+      )}
+      {canStop && (
+        <button className="btn" disabled={busy} onClick={() => act(() => api.stopCampaign(c.id), 'Dispatch stopped')}>
+          <IconStop /> Stop
+        </button>
+      )}
+      {c.status === 'draft' && (
+        <button className="btn" disabled={busy} onClick={() => act(() => api.scheduleCampaign(c.id, Date.now() + 3600_000), 'Scheduled in 1 hour')}>
+          <IconClock /> Schedule
+        </button>
+      )}
+      {c.status !== 'sending' && (
+        <button className="icon-btn" disabled={busy} title="Delete" onClick={() => act(() => api.deleteCampaign(c.id), 'Campaign deleted', onAfterDelete)}>
+          <IconTrash />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function CampaignList({ store, api, onSelect, onNew, toast }) {
   const { campaigns } = store;
   const order = { sending: 0, paused: 1, scheduled: 2, draft: 3, sent: 4 };
   const rows = [...campaigns].sort((a, b) => (order[a.status] - order[b.status]) || b.createdAt - a.createdAt);
@@ -37,9 +114,9 @@ function CampaignList({ store, onSelect, onNew }) {
               <th>Campaign</th>
               <th>Status</th>
               <th>Audience</th>
-              <th style={{ width: 170 }}>Progress</th>
+              <th style={{ width: 150 }}>Progress</th>
               <th className="num">Opens</th>
-              <th className="num">Clicks</th>
+              <th style={{ width: 130 }} className="num">Controls</th>
             </tr>
           </thead>
           <tbody>
@@ -63,7 +140,9 @@ function CampaignList({ store, onSelect, onNew }) {
                     <div className="mono-tag" style={{ marginTop: 5 }}>{pct(c.metrics.sent, c.metrics.recipients, 0)}</div>
                   </td>
                   <td className="num">{c.metrics.delivered ? pct(c.metrics.opened, c.metrics.delivered, 1) : '—'}</td>
-                  <td className="num">{c.metrics.delivered ? pct(c.metrics.clicked, c.metrics.delivered, 1) : '—'}</td>
+                  <td className="num">
+                    <CampaignControls c={c} api={api} toast={toast} compact />
+                  </td>
                 </tr>
               );
             })}
@@ -78,29 +157,15 @@ function CampaignDetail({ store, api, c, onBack, toast }) {
   const { mailboxes, audiences, dispatch } = store;
   const m = c.metrics;
   const mailbox = mailboxes.find((x) => x.id === c.mailboxId);
-  const audience = audiences.find((x) => x.id === c.audienceId);
-  const [busy, setBusy] = useState(false);
-
-  async function act(fn, label) {
-    setBusy(true);
-    try {
-      await fn();
-      toast(label);
-    } finally {
-      setBusy(false);
-    }
-  }
 
   const patch = (body) => api.updateCampaign(c.id, body);
 
-  const funnel = [
-    ['Recipients', m.recipients, m.recipients, 'var(--mist)'],
-    ['Sent', m.sent, m.recipients, 'var(--paper)'],
-    ['Delivered', m.delivered, m.recipients, 'var(--mint)'],
-    ['Opened', m.opened, m.delivered, 'var(--violet)'],
-    ['Clicked', m.clicked, m.delivered, 'var(--coral)'],
-    ['Bounced', m.bounced, m.sent, 'var(--amber)'],
-    ['Unsub', m.unsubscribed, m.delivered, 'var(--mist)'],
+  // A compact, readable KPI strip — the headline numbers without the full funnel.
+  const kpis = [
+    { label: 'Sent', value: compact(m.sent), sub: `${pct(m.sent, m.recipients, 0)} of ${compact(m.recipients)}`, color: 'var(--paper)' },
+    { label: 'Delivered', value: m.sent ? pct(m.delivered, m.sent, 1) : '—', sub: `${compact(m.delivered)} inboxed`, color: 'var(--mint)' },
+    { label: 'Open rate', value: m.delivered ? pct(m.opened, m.delivered, 1) : '—', sub: `${compact(m.opened)} opens`, color: 'var(--violet)' },
+    { label: 'Click rate', value: m.delivered ? pct(m.clicked, m.delivered, 1) : '—', sub: `${compact(m.clicked)} clicks`, color: 'var(--coral)' },
   ];
 
   return (
@@ -109,89 +174,71 @@ function CampaignDetail({ store, api, c, onBack, toast }) {
         <IconArrowLeft style={{ width: 15, height: 15 }} /> All campaigns
       </button>
 
-      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
+      {/* ---- Header ---- */}
+      <div className="detail-head">
+        <div style={{ minWidth: 0 }}>
           <div className="row" style={{ gap: 12 }}>
-            <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 26 }}>{c.name}</h1>
+            <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 24 }}>{c.name}</h1>
             <StatusBadge status={c.status} />
           </div>
           <div className="mono-tag" style={{ marginTop: 6 }}>
             {c.subject} · created {relTime(c.createdAt)}
             {c.launchedAt ? ` · launched ${relTime(c.launchedAt)}` : ''}
+            {c.scheduledAt ? ` · scheduled ${clockTime(c.scheduledAt)}` : ''}
           </div>
         </div>
-        <div className="row" style={{ gap: 8 }}>
-          {(c.status === 'draft' || c.status === 'scheduled' || c.status === 'paused') && (
-            <button className="btn primary" disabled={busy} onClick={() => act(() => api.launchCampaign(c.id), 'Dispatch started')}>
-              <IconPlay /> {c.status === 'paused' ? 'Resume' : 'Launch now'}
-            </button>
-          )}
-          {c.status === 'sending' && (
-            <button className="btn" disabled={busy} onClick={() => act(() => api.pauseCampaign(c.id), 'Dispatch paused')}>
-              <IconPause /> Pause
-            </button>
-          )}
-          {c.status === 'draft' && (
-            <button className="btn" disabled={busy} onClick={() => act(() => api.scheduleCampaign(c.id, Date.now() + 3600_000), 'Scheduled in 1 hour')}>
-              <IconClock /> Schedule
-            </button>
-          )}
-          {c.status !== 'sending' && (
-            <button className="icon-btn" disabled={busy} title="Delete" onClick={() => act(() => { api.deleteCampaign(c.id); onBack(); }, 'Campaign deleted')}>
-              <IconTrash />
-            </button>
-          )}
+        <CampaignControls c={c} api={api} toast={toast} onAfterDelete={onBack} />
+      </div>
+
+      {/* ---- KPI strip + progress ---- */}
+      <div className="panel panel-pad">
+        <div className="kpi-strip">
+          {kpis.map((k) => (
+            <div className="kpi" key={k.label}>
+              <div className="kpi-label">{k.label}</div>
+              <div className="kpi-value" style={{ color: k.color }}>{k.value}</div>
+              <div className="kpi-sub">{k.sub}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <Meter value={ratio(m.sent, m.recipients)} color={STATUS[c.status]?.color} />
+          <div className="row" style={{ justifyContent: 'space-between', marginTop: 8 }}>
+            <span className="mono-tag">{num(m.sent)} sent · {num(m.bounced)} bounced · {num(m.unsubscribed)} unsubscribed</span>
+            <span className="mono-tag">{num(m.recipients)} recipients</span>
+          </div>
         </div>
       </div>
 
       <DispatchStream packets={dispatch} campaigns={store.campaigns} campaignId={c.id} height={120} />
 
-      <div className="detail-grid">
-        <div className="panel panel-pad">
-          <div className="section-head" style={{ marginBottom: 14 }}>
-            <span className="eyebrow">Performance</span>
-            <h2>Funnel</h2>
-          </div>
-          {funnel.map(([label, val, base, color]) => (
-            <div className="funnel-row" key={label}>
-              <span className="lbl">{label}</span>
-              <Meter value={ratio(val, base)} color={color} />
-              <span className="val">{num(val)}</span>
-              <span className="pc">{base ? pct(val, base, 0) : '—'}</span>
-            </div>
-          ))}
+      {/* ---- Setup ---- */}
+      <div className="panel panel-pad">
+        <div className="section-head" style={{ marginBottom: 16 }}>
+          <span className="eyebrow">Configuration</span>
+          <h2>Setup</h2>
         </div>
-
-        <div className="panel panel-pad">
-          <div className="section-head" style={{ marginBottom: 14 }}>
-            <span className="eyebrow">Configuration</span>
-            <h2>Setup</h2>
+        <div className="setup-grid">
+          <div className="field">
+            <label>Send from</label>
+            <select className="select" value={c.mailboxId} disabled={c.status === 'sending' || c.status === 'sent'} onChange={(e) => patch({ mailboxId: e.target.value })}>
+              {mailboxes.map((mb) => (
+                <option key={mb.id} value={mb.id}>{mb.address}</option>
+              ))}
+            </select>
           </div>
-          <div className="grid" style={{ gap: 14 }}>
-            <div className="field">
-              <label>Send from</label>
-              <select className="select" value={c.mailboxId} disabled={c.status === 'sending' || c.status === 'sent'} onChange={(e) => patch({ mailboxId: e.target.value })}>
-                {mailboxes.map((mb) => (
-                  <option key={mb.id} value={mb.id}>{mb.address}</option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>Audience</label>
-              <select className="select" value={c.audienceId} disabled={c.metrics.sent > 0} onChange={(e) => patch({ audienceId: e.target.value })}>
-                {audiences.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name} — {compact(a.size)}</option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>Send rate — {c.sendRate} msg / batch</label>
-              <input className="range" type="range" min="4" max="80" value={c.sendRate} onChange={(e) => patch({ sendRate: Number(e.target.value) })} />
-            </div>
-            <div className="divider" />
-            <div className="kv"><span className="k">Mailbox reputation</span><span>{mailbox?.reputation ?? '—'}</span></div>
-            <div className="kv"><span className="k">Emails in sequence</span><span>{c.sequence?.length ?? 0}</span></div>
-            {c.scheduledAt && <div className="kv"><span className="k">Scheduled</span><span>{clockTime(c.scheduledAt)}</span></div>}
+          <div className="field">
+            <label>Audience</label>
+            <select className="select" value={c.audienceId} disabled={c.metrics.sent > 0} onChange={(e) => patch({ audienceId: e.target.value })}>
+              {audiences.map((a) => (
+                <option key={a.id} value={a.id}>{a.name} — {compact(a.size)}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>Send rate — {c.sendRate} msg / batch</label>
+            <input className="range" type="range" min="4" max="80" value={c.sendRate} onChange={(e) => patch({ sendRate: Number(e.target.value) })} />
+            <span className="hint">Mailbox reputation {mailbox?.reputation ?? '—'} · {c.sequence?.length ?? 0} email{(c.sequence?.length ?? 0) === 1 ? '' : 's'} in sequence</span>
           </div>
         </div>
       </div>
@@ -344,13 +391,9 @@ function SequenceStep({ c, step, index, dayOffset, isFirst, isLast, soloStep, ap
           />
         </div>
 
-        <div className="field" style={{ marginTop: 12, maxWidth: 260 }}>
-          <label>{isFirst ? 'Timing' : 'Delay after previous'}</label>
-          {isFirst ? (
-            <div className="select" style={{ color: 'var(--mist)', display: 'flex', alignItems: 'center' }}>
-              Sends immediately
-            </div>
-          ) : (
+        {!isFirst && (
+          <div className="field" style={{ marginTop: 12, maxWidth: 260 }}>
+            <label>Delay after previous</label>
             <div className="row" style={{ gap: 8 }}>
               <input
                 className="input"
@@ -363,8 +406,8 @@ function SequenceStep({ c, step, index, dayOffset, isFirst, isLast, soloStep, ap
               />
               <span className="mono-tag">days after previous email</span>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

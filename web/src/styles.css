@@ -4,32 +4,59 @@
    one warm signal accent that means "live".
    ============================================================ */
 
+/* ============================================================
+   Claude palette — warm cream + terracotta "Claude orange".
+   Light (cream) is the default; the dark theme is a warm near-black.
+   The whole UI is variable-driven, so re-mapping these re-themes it.
+   ============================================================ */
 :root {
-  --ink: #0b0e1a;
-  --ink-2: #0e1322;
-  --panel: #121829;
-  --panel-2: #161d31;
-  --line: #232c44;
-  --line-soft: #1a2236;
-  --paper: #e8ecf6;
-  --mist: #7e89a6;
-  --mist-dim: #586079;
+  --ink: #f0eee6; /* page background — Anthropic ivory */
+  --ink-2: #faf9f5; /* inset / inputs */
+  --panel: #ffffff; /* cards & panels */
+  --panel-2: #f5f3ec; /* raised / hover */
+  --line: #e4e0d4; /* warm borders */
+  --line-soft: #ece9df;
+  --paper: #2a2824; /* warm near-black text */
+  --mist: #73706a; /* muted warm gray */
+  --mist-dim: #a8a49a;
 
-  --coral: #ff6b4a;
-  --coral-dim: #ff6b4a26;
-  --violet: #8b7cf6;
-  --violet-dim: #8b7cf626;
-  --mint: #54e1c8;
-  --mint-dim: #54e1c826;
-  --amber: #e0a23b;
+  --coral: #d97757; /* Claude orange — the single primary accent */
+  --coral-dim: #d9775720;
+  --violet: #6a82b0; /* dusty slate-blue — "opened" / info */
+  --violet-dim: #6a82b020;
+  --mint: #5b9279; /* muted sage — "delivered" / success */
+  --mint-dim: #5b927920;
+  --amber: #c2913c; /* ochre — "bounce" / warn */
 
   --radius: 14px;
   --radius-sm: 9px;
-  --shadow: 0 18px 50px -24px rgba(0, 0, 0, 0.7);
+  --shadow: 0 14px 40px -28px rgba(60, 50, 40, 0.4);
 
   --font-display: 'Space Grotesk', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* ---- Warm dark theme ------------------------------------------------- */
+:root[data-theme='dark'] {
+  --ink: #1f1e1c;
+  --ink-2: #262522;
+  --panel: #2a2926;
+  --panel-2: #302f2b;
+  --line: #3c3a35;
+  --line-soft: #322f2b;
+  --paper: #ece9df;
+  --mist: #a8a39a;
+  --mist-dim: #757169;
+
+  --coral: #e08a6b;
+  --coral-dim: #e08a6b26;
+  --violet: #8aa0c8;
+  --violet-dim: #8aa0c826;
+  --mint: #76ab8e;
+  --mint-dim: #76ab8e26;
+  --amber: #d4a44e;
+  --shadow: 0 18px 50px -24px rgba(0, 0, 0, 0.6);
 }
 
 * {
@@ -75,7 +102,7 @@ textarea {
 
 ::selection {
   background: var(--coral);
-  color: #1a0c06;
+  color: #fff;
 }
 
 /* scrollbars */
@@ -127,7 +154,7 @@ textarea {
   width: 34px;
   height: 34px;
   border-radius: 9px;
-  background: radial-gradient(120% 120% at 30% 20%, #1d2740, #0c1120);
+  background: var(--coral-dim);
   border: 1px solid var(--line);
   display: grid;
   place-items: center;
@@ -260,7 +287,7 @@ textarea {
   gap: 20px;
   padding: 16px 28px;
   border-bottom: 1px solid var(--line);
-  background: rgba(11, 14, 26, 0.82);
+  background: rgba(240, 238, 230, 0.82);
   backdrop-filter: blur(10px);
 }
 .topbar h1 {
@@ -429,8 +456,8 @@ textarea {
   transition: transform 0.08s, border-color 0.15s, background 0.15s;
 }
 .btn:hover {
-  border-color: #2f3a58;
-  background: #1a2236;
+  border-color: var(--mist-dim);
+  background: var(--panel-2);
 }
 .btn:active {
   transform: translateY(1px);
@@ -442,11 +469,12 @@ textarea {
 .btn.primary {
   background: var(--coral);
   border-color: var(--coral);
-  color: #200b04;
+  color: #fff;
   font-weight: 600;
 }
 .btn.primary:hover {
-  background: #ff7d60;
+  background: #c8634a;
+  border-color: #c8634a;
 }
 .btn.ghost {
   background: transparent;
@@ -456,7 +484,7 @@ textarea {
   border-color: transparent;
 }
 .btn.danger:hover {
-  color: #ff7d60;
+  color: #c8634a;
   border-color: var(--coral);
   background: var(--coral-dim);
 }
@@ -482,7 +510,7 @@ textarea {
 }
 .icon-btn:hover {
   color: var(--paper);
-  border-color: #2f3a58;
+  border-color: var(--mist-dim);
 }
 .icon-btn svg {
   width: 16px;
@@ -549,8 +577,8 @@ textarea {
   position: relative;
   overflow: hidden;
   border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: radial-gradient(140% 100% at 100% 0%, #14213a 0%, var(--ink-2) 55%);
+  border: 1px solid #34322d;
+  background: radial-gradient(140% 100% at 100% 0%, #322f29 0%, #232220 55%);
 }
 .stream-head {
   display: flex;
@@ -573,9 +601,9 @@ textarea {
   height: 132px;
   margin: 0 8px 8px;
   border-radius: 10px;
-  background: repeating-linear-gradient(90deg, transparent 0 45px, rgba(255, 255, 255, 0.018) 45px 46px),
-    linear-gradient(180deg, #0a0f1d, #0c1222);
-  border: 1px solid var(--line-soft);
+  background: repeating-linear-gradient(90deg, transparent 0 45px, rgba(255, 255, 255, 0.02) 45px 46px),
+    linear-gradient(180deg, #1c1b19, #211f1c);
+  border: 1px solid #34322d;
   overflow: hidden;
 }
 .stream-lane .axis {
@@ -583,7 +611,7 @@ textarea {
   left: 0;
   right: 0;
   height: 1px;
-  background: var(--line);
+  background: #3a3833;
   top: 50%;
 }
 .packet {
@@ -765,7 +793,7 @@ textarea {
   transition: border-color 0.15s, transform 0.12s;
 }
 .card:hover {
-  border-color: #2f3a58;
+  border-color: var(--mist-dim);
 }
 .card-clickable {
   cursor: pointer;
@@ -823,12 +851,13 @@ textarea {
 }
 .chip.on {
   color: var(--mint);
-  border-color: #2c4d49;
+  border-color: var(--mint);
   background: var(--mint-dim);
 }
 .chip.off {
   color: var(--amber);
-  border-color: #4a3d22;
+  border-color: var(--amber);
+  background: transparent;
 }
 
 /* auth dots for spf/dkim/dmarc */
@@ -920,7 +949,7 @@ textarea {
   position: fixed;
   inset: 0;
   z-index: 50;
-  background: rgba(5, 7, 14, 0.66);
+  background: rgba(40, 37, 33, 0.42);
   backdrop-filter: blur(4px);
   display: flex;
   justify-content: flex-end;
@@ -936,7 +965,7 @@ textarea {
   height: 100%;
   background: var(--ink-2);
   border-left: 1px solid var(--line);
-  box-shadow: -30px 0 60px -30px #000;
+  box-shadow: -30px 0 60px -34px rgba(60, 50, 40, 0.5);
   overflow-y: auto;
   animation: slide 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -1265,5 +1294,348 @@ textarea {
   }
   .packet {
     display: none;
+  }
+}
+
+/* ============================================================
+   Dark theme — targeted overrides for the few spots that hardcode
+   light-translucent values the variables don't cover.
+   ============================================================ */
+:root[data-theme='dark'] body::before {
+  opacity: 0.4;
+}
+:root[data-theme='dark'] .topbar {
+  background: rgba(31, 30, 28, 0.82);
+}
+
+/* The dispatch stream stays a warm-dark "instrument panel" in both themes, so
+   its text is pinned to light values independent of --paper. */
+.stream {
+  color: #cabfb0;
+}
+.stream-head .title {
+  color: #f3efe6;
+}
+.stream-legend {
+  color: #9a9388;
+}
+.stream-empty {
+  color: #6f6a61;
+}
+
+/* ============================================================
+   Auth / login
+   ============================================================ */
+.boot {
+  position: fixed;
+  inset: 0;
+  background: var(--ink);
+}
+.login {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.login-card {
+  width: min(420px, 96vw);
+  background: linear-gradient(180deg, var(--panel), var(--ink-2));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 34px 32px 28px;
+}
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 26px;
+}
+.login-brand .mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--coral-dim);
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+}
+.login-brand .mark svg {
+  width: 24px;
+  height: 24px;
+}
+.login-brand .name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 19px;
+  letter-spacing: 0.16em;
+}
+.login-brand .sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--mist);
+  text-transform: uppercase;
+}
+.login-card h1 {
+  font-family: var(--font-display);
+  font-size: 24px;
+  margin: 0 0 6px;
+}
+.login-lead {
+  color: var(--mist);
+  font-size: 13.5px;
+  margin: 0 0 22px;
+}
+.login-error {
+  margin-top: 16px;
+  padding: 10px 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--coral);
+  background: var(--coral-dim);
+  color: var(--coral);
+  font-size: 13px;
+}
+.login-hint {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--mist);
+}
+.login-hint code {
+  font-family: var(--font-mono);
+  color: var(--paper);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+/* ============================================================
+   Rail user row
+   ============================================================ */
+.user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 14px;
+}
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--coral);
+}
+.user-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-handle {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--mist-dim);
+}
+.user-row .icon-btn {
+  margin-left: auto;
+}
+
+/* ============================================================
+   Campaign detail — header, KPI strip, setup
+   ============================================================ */
+.detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+}
+.kpi {
+  padding: 4px 18px;
+  border-left: 1px solid var(--line-soft);
+}
+.kpi:first-child {
+  padding-left: 0;
+  border-left: none;
+}
+.kpi-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mist);
+}
+.kpi-value {
+  font-family: var(--font-display);
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-top: 7px;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--mist);
+  margin-top: 4px;
+}
+.setup-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+/* play / stop accents on icon buttons */
+.icon-btn.play {
+  color: var(--mint);
+}
+.icon-btn.play:hover {
+  border-color: var(--mint);
+  color: var(--mint);
+}
+.icon-btn.stop {
+  color: var(--coral);
+}
+.icon-btn.stop:hover {
+  border-color: var(--coral);
+  color: var(--coral);
+}
+
+/* ============================================================
+   Contacts — search, checkbox grid
+   ============================================================ */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--mist);
+}
+.search input {
+  border: none;
+  background: none;
+  outline: none;
+  padding: 9px 0;
+  font-size: 13.5px;
+  color: var(--paper);
+  width: 180px;
+}
+.search input::placeholder {
+  color: var(--mist-dim);
+}
+
+.check-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  cursor: pointer;
+  font-size: 13px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.check-item.on {
+  border-color: var(--coral);
+  background: var(--coral-dim);
+}
+.check-item input {
+  accent-color: var(--coral);
+  width: 15px;
+  height: 15px;
+}
+
+/* ============================================================
+   Settings — toggle switch
+   ============================================================ */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+}
+.toggle-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.switch {
+  flex: none;
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s;
+}
+.switch .knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--mist);
+  transition: transform 0.18s, background 0.18s;
+}
+.switch.on {
+  background: var(--coral);
+  border-color: var(--coral);
+}
+.switch.on .knob {
+  transform: translateX(20px);
+  background: #fff;
+}
+
+@media (max-width: 1080px) {
+  .setup-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .kpi-strip {
+    grid-template-columns: 1fr 1fr;
+    gap: 16px 0;
+  }
+  .kpi:nth-child(3) {
+    padding-left: 0;
+    border-left: none;
+  }
+  .check-grid {
+    grid-template-columns: 1fr;
+  }
+  .search input {
+    width: 120px;
   }
 }
