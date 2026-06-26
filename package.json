@@ -9,12 +9,13 @@
   ],
   "scripts": {
     "dev": "concurrently -n server,web -c magenta,cyan \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "npm --workspace server run dev",
+    "dev:server": "nodemon server/index.js",
     "dev:web": "npm --workspace web run dev",
     "build": "npm --workspace web run build",
     "start": "npm --workspace server run start"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.1.4"
   }
 }

@@ -4,6 +4,9 @@ node_modules/
 # build output
 web/dist/
 
+# SQLite database (created at runtime)
+data/
+
 # logs
 *.log
 npm-debug.log*

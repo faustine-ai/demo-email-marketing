@@ -1,8 +1,14 @@
-// In-memory state + a tiny pub/sub so the WebSocket layer can broadcast
-// every significant change. No database: the whole world is this object.
+// A live in-memory copy of the world + a tiny pub/sub so the WebSocket layer
+// can broadcast every significant change. SQLite (see db.js) is the durable
+// store: we load the world from it on boot and write through on every change.
 import { buildSeed, blankMetrics, evt, nextId } from './seed.js';
+import * as db from './db.js';
 
-const state = buildSeed();
+// First boot on a fresh database: lay down the seed world. Afterwards we always
+// hydrate from disk, so edits and dispatch progress survive restarts.
+if (db.isEmpty()) db.seed(buildSeed());
+const state = db.loadState();
+
 const subscribers = new Set();
 
 export function subscribe(fn) {
@@ -32,8 +38,21 @@ export function pushActivity(message, severity = 'info') {
   const e = evt(message, severity);
   state.activity.unshift(e);
   state.activity = state.activity.slice(0, 200);
+  db.saveActivity(e);
+  db.trimActivity(200);
   broadcast('activity', e);
   return e;
+}
+
+// Write-through helpers — persist a campaign row (metrics/status/scalars) and,
+// when its emails changed, its sequence steps. Exported so the simulator can
+// persist the metric deltas it produces each tick.
+export function persistCampaign(c, withSequence = false) {
+  db.saveCampaign(c);
+  if (withSequence) db.replaceSequence(c.id, c.sequence ?? []);
+}
+export function persistMailbox(m) {
+  db.saveMailbox(m);
 }
 
 // ---- campaigns --------------------------------------------------------
@@ -64,6 +83,7 @@ export function createCampaign(input = {}) {
   // and body are authored inline; follow-up steps can be added from the detail view.
   c.sequence = [{ id: nextId('seq'), subject: c.subject, body: input.body?.trim() || '', delayDays: 0 }];
   state.campaigns.unshift(c);
+  persistCampaign(c, true);
   broadcast('campaign:update', c);
   pushActivity(`Campaign drafted — ${c.name}`, 'info');
   return c;
@@ -83,7 +103,9 @@ export function updateCampaign(id, patch = {}) {
   }
   // Keep the first sequence step's subject in step with the campaign headline.
   const first = c.sequence?.[0];
-  if (first && 'subject' in patch && patch.subject != null) first.subject = c.subject;
+  const subjectChanged = first && 'subject' in patch && patch.subject != null;
+  if (subjectChanged) first.subject = c.subject;
+  persistCampaign(c, subjectChanged);
   broadcast('campaign:update', c);
   return c;
 }
@@ -109,6 +131,7 @@ export function addSequenceStep(id, input = {}) {
   };
   c.sequence.push(step);
   syncPrimaryFromSequence(c);
+  persistCampaign(c, true);
   broadcast('campaign:update', c);
   pushActivity(`Sequence step added — ${c.name} (${c.sequence.length} emails)`, 'info');
   return c;
@@ -123,6 +146,7 @@ export function updateSequenceStep(id, stepId, patch = {}) {
   if ('body' in patch && patch.body != null) step.body = patch.body;
   if ('delayDays' in patch && patch.delayDays != null) step.delayDays = clamp(patch.delayDays, 0, 90);
   syncPrimaryFromSequence(c);
+  persistCampaign(c, true);
   broadcast('campaign:update', c);
   return c;
 }
@@ -133,6 +157,7 @@ export function removeSequenceStep(id, stepId) {
   if (!Array.isArray(c.sequence) || c.sequence.length <= 1) return c; // always keep one step
   c.sequence = c.sequence.filter((s) => s.id !== stepId);
   syncPrimaryFromSequence(c);
+  persistCampaign(c, true);
   broadcast('campaign:update', c);
   pushActivity(`Sequence step removed — ${c.name}`, 'warn');
   return c;
@@ -147,6 +172,7 @@ export function reorderSequence(id, order = []) {
   if (next.length === c.sequence.length) {
     c.sequence = next;
     syncPrimaryFromSequence(c);
+    persistCampaign(c, true);
     broadcast('campaign:update', c);
   }
   return c;
@@ -159,6 +185,7 @@ export function launchCampaign(id) {
   c.status = 'sending';
   c.launchedAt = c.launchedAt || Date.now();
   c.scheduledAt = null;
+  persistCampaign(c);
   broadcast('campaign:update', c);
   pushActivity(`Dispatch started — ${c.name}`, 'success');
   return c;
@@ -169,6 +196,7 @@ export function pauseCampaign(id) {
   if (!c) return null;
   if (c.status === 'sending') {
     c.status = 'paused';
+    persistCampaign(c);
     broadcast('campaign:update', c);
     pushActivity(`Dispatch paused — ${c.name}`, 'warn');
   }
@@ -180,6 +208,7 @@ export function scheduleCampaign(id, scheduledAt) {
   if (!c) return null;
   c.status = 'scheduled';
   c.scheduledAt = scheduledAt || Date.now() + 3_600_000;
+  persistCampaign(c);
   broadcast('campaign:update', c);
   pushActivity(`Campaign scheduled — ${c.name}`, 'info');
   return c;
@@ -189,6 +218,7 @@ export function deleteCampaign(id) {
   const i = state.campaigns.findIndex((x) => x.id === id);
   if (i < 0) return false;
   const [removed] = state.campaigns.splice(i, 1);
+  db.deleteCampaign(id);
   broadcast('campaign:remove', { id });
   pushActivity(`Campaign deleted — ${removed.name}`, 'warn');
   return true;
@@ -204,6 +234,7 @@ export function updateMailbox(id, patch = {}) {
   if (!m) return null;
   const allowed = ['fromName', 'dailyLimit', 'status', 'spf', 'dkim', 'dmarc'];
   for (const k of allowed) if (k in patch) m[k] = patch[k];
+  db.saveMailbox(m);
   broadcast('mailbox:update', m);
   if ('status' in patch) pushActivity(`Mailbox ${m.address} → ${patch.status}`, patch.status === 'paused' ? 'warn' : 'info');
   return m;
@@ -228,6 +259,7 @@ export function createMailbox(input = {}) {
     createdAt: Date.now(),
   };
   state.mailboxes.push(m);
+  db.saveMailbox(m);
   broadcast('mailbox:update', m);
   pushActivity(`Mailbox connected — ${m.address} (warming)`, 'info');
   return m;
@@ -249,6 +281,7 @@ export function createAudience(input = {}) {
     filters: Array.isArray(input.filters) ? input.filters : [],
   };
   state.audiences.push(a);
+  db.saveAudience(a);
   broadcast('audience:update', a);
   pushActivity(`Segment created — ${a.name}`, 'info');
   return a;
@@ -265,6 +298,7 @@ export function updateTemplate(id, patch = {}) {
   const allowed = ['name', 'subject', 'preheader', 'category', 'accent'];
   for (const k of allowed) if (k in patch) t[k] = patch[k];
   t.updatedAt = Date.now();
+  db.saveTemplate(t);
   broadcast('template:update', t);
   return t;
 }
@@ -275,6 +309,7 @@ export function deleteTemplate(id) {
   const t = find(state.templates, id);
   if (!t) return { ok: false, code: 404 };
   state.templates = state.templates.filter((x) => x.id !== id);
+  db.deleteTemplate(id);
   broadcast('template:remove', { id });
   pushActivity(`Template deleted — ${t.name}`, 'warn');
   return { ok: true };
@@ -292,6 +327,7 @@ export function createTemplate(input = {}) {
     updatedAt: Date.now(),
   };
   state.templates.push(t);
+  db.saveTemplate(t);
   broadcast('template:update', t);
   pushActivity(`Template created — ${t.name}`, 'info');
   return t;

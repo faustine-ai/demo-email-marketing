@@ -13,18 +13,36 @@ UI. This is a demo of the configuration + real-time surface, not a mail server.
   feed; every significant change (campaign progress, mailbox health, activity)
   arrives as a push and re-renders the relevant view. Open two tabs to see them
   stay in sync.
-- **Backend** — Node + Express + `ws`. In-memory state (no database), a REST API
-  for mutations, and a dispatch simulator that ticks every 350 ms.
+- **Backend** — Node + Express + `ws`. A SQLite database (via `better-sqlite3`)
+  is the durable store; the server keeps a live in-memory copy and writes through
+  on every change. A dispatch simulator ticks every 350 ms.
 
-## Run it
+## Run it with Docker (recommended)
+
+```bash
+docker compose up
+```
+
+Then open **http://localhost:5180**.
+
+One container runs both the API (`:4100`) and the Vite UI (`:5180`). The SQLite
+database is stored on a named volume (`relay-data`), so campaigns, sequences and
+dispatch progress **survive restarts**. Source is bind-mounted, so:
+
+- editing **UI files** (`web/src`) hot-reloads the browser **and restarts the
+  API server** (via `nodemon`);
+- editing **server files** restarts the API server too.
+
+To start from a clean database, drop the volume: `docker compose down -v`.
+
+## Run it without Docker
 
 ```bash
 npm install        # installs both workspaces (server + web)
 npm run dev        # starts the API on :4100 and the UI on :5180
 ```
 
-Then open **http://localhost:5180**.
-
+The SQLite file is written to `./data/relay.db` (override with `DB_PATH`).
 The Vite dev server proxies `/api` and `/ws` to the backend, so everything runs
 from one origin.
 
@@ -42,6 +60,6 @@ from one origin.
 ## Layout
 
 ```
-server/   Express + ws API, in-memory store, dispatch simulator
+server/   Express + ws API, SQLite store (db.js), dispatch simulator
 web/      React + Vite client (external store over WebSocket)
 ```

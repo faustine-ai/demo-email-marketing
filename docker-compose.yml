@@ -1,0 +1,24 @@
+services:
+  app:
+    build: .
+    # Both processes run in this one container.
+    ports:
+      - "4100:4100" # API + WebSocket
+      - "5180:5180" # Vite UI
+    environment:
+      # SQLite database lives on the named volume below, so data survives restarts.
+      DB_PATH: /app/data/relay.db
+      # Bind-mounted source on macOS/Windows needs polling for file watching to fire
+      # (drives both Vite HMR and the nodemon server restart).
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      # Live-mount source so edits on the host are picked up inside the container.
+      - ./server:/app/server
+      - ./web:/app/web
+      - ./package.json:/app/package.json
+      - ./nodemon.json:/app/nodemon.json
+      # Persist the SQLite database across `docker compose down` / `up`.
+      - relay-data:/app/data
+
+volumes:
+  relay-data:

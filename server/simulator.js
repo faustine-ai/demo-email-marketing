@@ -1,7 +1,7 @@
 // The dispatch engine. No real email leaves the building — instead we model
 // what a sending campaign *looks like* over time and stream it to clients:
 // packets onto the dispatch stream, metric deltas, and activity events.
-import { _state, broadcast, pushActivity } from './store.js';
+import { _state, broadcast, pushActivity, persistCampaign, persistMailbox } from './store.js';
 
 const TICK_MS = 350;
 
@@ -63,7 +63,10 @@ function tick() {
 
     // Count this batch against the mailbox's daily volume.
     const mbx = state.mailboxes.find((x) => x.id === c.mailboxId);
-    if (mbx) mbx.sentToday += batch;
+    if (mbx) {
+      mbx.sentToday += batch;
+      persistMailbox(mbx);
+    }
 
     // A few representative packets feed the live stream (not one per email).
     const sample = Math.min(batch, 6);
@@ -73,6 +76,7 @@ function tick() {
       packets.push({ campaignId: c.id, kind, t: Date.now() + i });
     }
 
+    persistCampaign(c);
     broadcast('campaign:update', c);
 
     // Narrate milestones once.
@@ -94,6 +98,7 @@ function tick() {
 function finish(c) {
   c.status = 'sent';
   c.finishedAt = Date.now();
+  persistCampaign(c);
   broadcast('campaign:update', c);
   pushActivity(`${c.name} complete — ${c.metrics.delivered.toLocaleString()} delivered`, 'success');
 }
@@ -110,6 +115,7 @@ function ambient(state) {
       // Nudge reputation upward as it warms.
       if (mbx.reputation < 92 && Math.random() < 0.4) {
         mbx.reputation = Math.min(92, mbx.reputation + 1);
+        persistMailbox(mbx);
         broadcast('mailbox:update', mbx);
       }
     } else if (mbx.status === 'active') {
@@ -117,6 +123,7 @@ function ambient(state) {
       const next = Math.max(60, Math.min(99, mbx.reputation + drift));
       if (next !== mbx.reputation) {
         mbx.reputation = next;
+        persistMailbox(mbx);
         broadcast('mailbox:update', mbx);
       }
     }

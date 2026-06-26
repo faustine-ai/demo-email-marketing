@@ -1,0 +1,7 @@
+{
+  "watch": ["server", "web/src", "web/index.html"],
+  "ext": "js,jsx,json,css,html",
+  "ignore": ["data", "**/*.test.js"],
+  "legacyWatch": true,
+  "delay": 250
+}

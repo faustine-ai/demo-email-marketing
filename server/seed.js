@@ -1,8 +1,12 @@
 // Seed data for the RELAY dispatch console.
 // Everything lives in memory — this is a demo, no database required.
 
-let _seq = 1000;
-export const nextId = (prefix) => `${prefix}_${(_seq++).toString(36)}`;
+// IDs must stay unique across process restarts (the in-memory counter resets,
+// but the database persists). Combining the boot time with a per-process counter
+// guarantees no collision with IDs minted in an earlier run.
+let _seq = 0;
+const _boot = Date.now().toString(36);
+export const nextId = (prefix) => `${prefix}_${_boot}${(_seq++).toString(36)}`;
 
 // One email in a campaign's drip sequence. Subject + body are authored inline
 // (no templates). `delayDays` is the wait after the previous step (the first
