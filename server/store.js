@@ -1,13 +1,45 @@
 // A live in-memory copy of the world + a tiny pub/sub so the WebSocket layer
 // can broadcast every significant change. SQLite (see db.js) is the durable
 // store: we load the world from it on boot and write through on every change.
-import { buildSeed, blankMetrics, evt, nextId } from './seed.js';
+import { buildSeed, blankMetrics, evt, nextId, defaultSettings } from './seed.js';
+import { hashPassword } from './auth.js';
 import * as db from './db.js';
 
 // First boot on a fresh database: lay down the seed world. Afterwards we always
 // hydrate from disk, so edits and dispatch progress survive restarts.
 if (db.isEmpty()) db.seed(buildSeed());
 const state = db.loadState();
+
+// Settings: ensure a row exists (older databases won't have one).
+if (!state.settings) {
+  state.settings = defaultSettings();
+  db.saveSettings(state.settings);
+}
+
+// Contacts arrived after the first release. A fresh database seeds them via
+// db.seed(), but databases created before contacts existed won't have any.
+// Back-fill the demo contacts exactly once (tracked by a settings flag, so
+// intentionally clearing all contacts later won't trigger a reseed).
+if (!state.settings.contactsSeeded && state.contacts.length === 0) {
+  const seeded = buildSeed().contacts;
+  state.contacts = seeded;
+  for (const c of seeded) db.saveContact(c);
+  state.settings.contactsSeeded = true;
+  db.saveSettings(state.settings);
+}
+
+// Seed a default user on first boot so the demo is reachable. The credentials
+// are intentionally simple and shown on the login screen: admin / relay.
+if (db.usersEmpty()) {
+  db.saveUser({
+    id: nextId('usr'),
+    username: 'admin',
+    name: 'Console Admin',
+    passwordHash: hashPassword('relay'),
+    role: 'admin',
+    createdAt: Date.now(),
+  });
+}
 
 const subscribers = new Set();
 
@@ -27,8 +59,14 @@ export function snapshot() {
     mailboxes: state.mailboxes,
     audiences: state.audiences,
     templates: state.templates,
+    contacts: state.contacts,
+    settings: state.settings,
     activity: state.activity.slice(0, 60),
   };
+}
+
+export function getSettings() {
+  return state.settings;
 }
 
 // ---- helpers ----------------------------------------------------------
@@ -203,6 +241,23 @@ export function pauseCampaign(id) {
   return c;
 }
 
+// Stop halts a running or paused campaign for good (unlike pause, which is a
+// temporary hold). The campaign drops back to draft so its progress is frozen
+// and it can be relaunched deliberately.
+export function stopCampaign(id) {
+  const c = getCampaign(id);
+  if (!c) return null;
+  if (c.status === 'sending' || c.status === 'paused' || c.status === 'scheduled') {
+    c.status = 'draft';
+    c.scheduledAt = null;
+    delete c._milestones;
+    persistCampaign(c);
+    broadcast('campaign:update', c);
+    pushActivity(`Dispatch stopped — ${c.name}`, 'warn');
+  }
+  return c;
+}
+
 export function scheduleCampaign(id, scheduledAt) {
   const c = getCampaign(id);
   if (!c) return null;
@@ -331,6 +386,95 @@ export function createTemplate(input = {}) {
   broadcast('template:update', t);
   pushActivity(`Template created — ${t.name}`, 'info');
   return t;
+}
+
+// ---- contacts ---------------------------------------------------------
+// Contacts are the people on your lists. Each contact can belong to any number
+// of audiences (lists); membership is the array of audience ids in `listIds`.
+export function listContacts() {
+  return state.contacts;
+}
+
+// Keep a membership-based list's `size` in step with how many contacts belong
+// to it. Filter-based *segments* (the seeded audiences) model an estimated
+// reach instead, so we leave their size alone — only plain lists (no filters)
+// are counted from real contact membership.
+function recountList(listId) {
+  const aud = find(state.audiences, listId);
+  if (!aud || (aud.filters && aud.filters.length > 0)) return;
+  aud.size = state.contacts.filter((c) => c.listIds.includes(listId)).length;
+  db.saveAudience(aud);
+  broadcast('audience:update', aud);
+}
+
+function sanitizeListIds(ids) {
+  if (!Array.isArray(ids)) return [];
+  const valid = new Set(state.audiences.map((a) => a.id));
+  return [...new Set(ids.filter((id) => valid.has(id)))];
+}
+
+export function createContact(input = {}) {
+  const email = (input.email || '').trim().toLowerCase();
+  if (!email || !email.includes('@')) return { error: 'invalid_email' };
+  const c = {
+    id: nextId('ct'),
+    email,
+    name: input.name?.trim() || email.split('@')[0],
+    status: ['subscribed', 'unsubscribed', 'bounced'].includes(input.status) ? input.status : 'subscribed',
+    listIds: sanitizeListIds(input.listIds),
+    createdAt: Date.now(),
+  };
+  state.contacts.unshift(c);
+  db.saveContact(c);
+  broadcast('contact:update', c);
+  c.listIds.forEach(recountList);
+  pushActivity(`Contact added — ${c.email}`, 'info');
+  return c;
+}
+
+export function updateContact(id, patch = {}) {
+  const c = find(state.contacts, id);
+  if (!c) return null;
+  const before = new Set(c.listIds);
+  if ('email' in patch && patch.email) {
+    const email = patch.email.trim().toLowerCase();
+    if (email.includes('@')) c.email = email;
+  }
+  if ('name' in patch && patch.name != null) c.name = patch.name.trim() || c.name;
+  if ('status' in patch && ['subscribed', 'unsubscribed', 'bounced'].includes(patch.status)) c.status = patch.status;
+  if ('listIds' in patch) c.listIds = sanitizeListIds(patch.listIds);
+  db.saveContact(c);
+  broadcast('contact:update', c);
+  // Recount every list the contact entered or left.
+  new Set([...before, ...c.listIds]).forEach(recountList);
+  return c;
+}
+
+export function deleteContact(id) {
+  const i = state.contacts.findIndex((x) => x.id === id);
+  if (i < 0) return false;
+  const [removed] = state.contacts.splice(i, 1);
+  db.deleteContact(id);
+  broadcast('contact:remove', { id });
+  removed.listIds.forEach(recountList);
+  pushActivity(`Contact removed — ${removed.email}`, 'warn');
+  return true;
+}
+
+// ---- settings ---------------------------------------------------------
+// Global sending limits. The simulator reads these every tick to cap send rate
+// and halt dispatch once the configured volume ceilings are reached.
+export function updateSettings(patch = {}) {
+  const s = state.settings;
+  const numKeys = ['globalDailyLimit', 'maxSendRate', 'perCampaignDailyLimit'];
+  for (const k of numKeys) {
+    if (k in patch && patch[k] != null) s[k] = Math.max(0, Math.round(Number(patch[k])) || 0);
+  }
+  if ('enforceLimits' in patch) s.enforceLimits = !!patch.enforceLimits;
+  db.saveSettings(s);
+  broadcast('settings:update', s);
+  pushActivity('Sending limits updated', 'info');
+  return s;
 }
 
 // raw access for the simulator

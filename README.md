@@ -46,16 +46,36 @@ The SQLite file is written to `./data/relay.db` (override with `DB_PATH`).
 The Vite dev server proxies `/api` and `/ws` to the backend, so everything runs
 from one origin.
 
+## Signing in
+
+The console is gated by username + password. On login the server issues a JWT
+(HS256, signed with `JWT_SECRET`); the client keeps it in `sessionStorage` and
+sends it as `Authorization: Bearer …` on every API call and as a `?token=` query
+param on the WebSocket. A default user is seeded on first boot:
+
+```
+admin / relay
+```
+
 ## What to try
 
+- **Theme** — toggle dark / light ("clear") from the sun-moon button in the top
+  bar. The choice persists in `localStorage`.
 - **Overview** — the live dispatch stream (the signature view), aggregate
   metrics, in-flight campaigns and a streaming activity feed.
-- **Campaigns** — open one and hit **Launch now**; watch the funnel and stream
-  fill in real time. Pause, resume, schedule, or delete.
+- **Campaigns** — open one and hit **Launch now**; watch the KPIs and stream
+  fill in real time. Play / pause / **stop** straight from the list, or from the
+  cleaned-up detail view. Schedule or delete drafts.
 - **Mailboxes** — reputation, warmup, SPF/DKIM/DMARC, daily volume; pause a
   sender and the change broadcasts everywhere.
-- **Audiences / Templates** — create segments and layouts; new records appear
-  instantly in any open session.
+- **Audiences** — browse and search **contacts**, add or edit them, set their
+  subscribe status, and assign them to **lists**. Create new lists; their size
+  tracks real membership (filter-based segments keep their modelled reach).
+- **Settings** — set sending limits (max send rate, per-campaign and global
+  daily caps). The dispatch simulator enforces them live — campaigns pause or
+  hold once a ceiling is hit.
+- **Templates** — reusable layouts; new records appear instantly in any open
+  session.
 
 ## Layout
 

@@ -38,6 +38,17 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS activity (
     id TEXT PRIMARY KEY, message TEXT, severity TEXT, ts INTEGER
   );
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY, username TEXT UNIQUE, name TEXT, passwordHash TEXT,
+    role TEXT, createdAt INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS contacts (
+    id TEXT PRIMARY KEY, email TEXT, name TEXT, status TEXT, listIds TEXT,
+    createdAt INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT
+  );
 `);
 
 const bool = (v) => (v ? 1 : 0);
@@ -62,6 +73,13 @@ const rowToCampaign = (r, sequence) => ({
   launchedAt: r.launchedAt, metrics: JSON.parse(r.metrics || '{}'), sequence,
 });
 const rowToActivity = (r) => ({ id: r.id, message: r.message, severity: r.severity, ts: r.ts });
+const rowToUser = (r) => ({
+  id: r.id, username: r.username, name: r.name, passwordHash: r.passwordHash, role: r.role, createdAt: r.createdAt,
+});
+const rowToContact = (r) => ({
+  id: r.id, email: r.email, name: r.name, status: r.status,
+  listIds: JSON.parse(r.listIds || '[]'), createdAt: r.createdAt,
+});
 
 // ---- prepared statements ---------------------------------------------
 const upMailbox = db.prepare(`
@@ -95,6 +113,18 @@ const insStep = db.prepare(`
 `);
 const insActivity = db.prepare('INSERT OR REPLACE INTO activity (id,message,severity,ts) VALUES (@id,@message,@severity,@ts)');
 const trimActivityStmt = db.prepare('DELETE FROM activity WHERE id NOT IN (SELECT id FROM activity ORDER BY ts DESC LIMIT ?)');
+const upUser = db.prepare(`
+  INSERT INTO users (id,username,name,passwordHash,role,createdAt)
+  VALUES (@id,@username,@name,@passwordHash,@role,@createdAt)
+  ON CONFLICT(id) DO UPDATE SET username=@username,name=@name,passwordHash=@passwordHash,role=@role,createdAt=@createdAt
+`);
+const upContact = db.prepare(`
+  INSERT INTO contacts (id,email,name,status,listIds,createdAt)
+  VALUES (@id,@email,@name,@status,@listIds,@createdAt)
+  ON CONFLICT(id) DO UPDATE SET email=@email,name=@name,status=@status,listIds=@listIds,createdAt=@createdAt
+`);
+const delContactRow = db.prepare('DELETE FROM contacts WHERE id = ?');
+const upSettings = db.prepare('INSERT INTO settings (id,data) VALUES (1,@data) ON CONFLICT(id) DO UPDATE SET data=@data');
 
 // ---- public write API -------------------------------------------------
 export const saveMailbox = (m) => upMailbox.run({ ...m, spf: bool(m.spf), dkim: bool(m.dkim), dmarc: bool(m.dmarc) });
@@ -124,6 +154,21 @@ export const deleteTemplate = (id) => delTemplateRow.run(id);
 export const saveActivity = (e) => insActivity.run(e);
 export const trimActivity = (limit) => trimActivityStmt.run(limit);
 
+export const saveUser = (u) => upUser.run(u);
+export const saveContact = (c) => upContact.run({ ...c, listIds: JSON.stringify(c.listIds ?? []) });
+export const deleteContact = (id) => delContactRow.run(id);
+export const saveSettings = (s) => upSettings.run({ data: JSON.stringify(s ?? {}) });
+
+export function getUserByUsername(username) {
+  const r = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  return r ? rowToUser(r) : null;
+}
+export function getUserById(id) {
+  const r = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  return r ? rowToUser(r) : null;
+}
+export const usersEmpty = () => db.prepare('SELECT COUNT(*) AS n FROM users').get().n === 0;
+
 // ---- load / seed ------------------------------------------------------
 export function isEmpty() {
   return db.prepare('SELECT COUNT(*) AS n FROM campaigns').get().n === 0;
@@ -139,6 +184,7 @@ export const seed = db.transaction((world) => {
     replaceSequence(c.id, c.sequence ?? []);
   }
   for (const e of world.activity) saveActivity(e);
+  for (const c of world.contacts ?? []) saveContact(c);
 });
 
 export function loadState() {
@@ -156,7 +202,12 @@ export function loadState() {
     .map((r) => rowToCampaign(r, stepsByCampaign[r.id] || []));
 
   const activity = db.prepare('SELECT * FROM activity ORDER BY ts DESC LIMIT 200').all().map(rowToActivity);
-  return { mailboxes, audiences, templates, campaigns, activity };
+  const contacts = db.prepare('SELECT * FROM contacts ORDER BY createdAt DESC').all().map(rowToContact);
+
+  const settingsRow = db.prepare('SELECT data FROM settings WHERE id = 1').get();
+  const settings = settingsRow ? JSON.parse(settingsRow.data || '{}') : null;
+
+  return { mailboxes, audiences, templates, campaigns, activity, contacts, settings };
 }
 
 export default db;

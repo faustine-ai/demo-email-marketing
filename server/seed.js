@@ -289,7 +289,35 @@ export function buildSeed() {
     evt('cmp_winback finished — 9,540 delivered', 'success', now - days(6) + hours(3)),
   ];
 
-  return { mailboxes, audiences, templates, campaigns, activity };
+  const contacts = [
+    contact('avery.lloyd@northwind.io', 'Avery Lloyd', 'subscribed', ['aud_active', 'aud_power'], now - days(40)),
+    contact('priya.menon@harborline.com', 'Priya Menon', 'subscribed', ['aud_active'], now - days(33)),
+    contact('marcus.webb@cobaltlabs.dev', 'Marcus Webb', 'subscribed', ['aud_power'], now - days(28)),
+    contact('jana.koch@meridian.co', 'Jana Koch', 'subscribed', ['aud_trial'], now - days(21)),
+    contact('tom.whitfield@lumen.app', 'Tom Whitfield', 'unsubscribed', ['aud_winback'], now - days(18)),
+    contact('sofia.reyes@brightpath.org', 'Sofia Reyes', 'subscribed', ['aud_active', 'aud_trial'], now - days(14)),
+    contact('dmitri.volkov@arcadia.io', 'Dmitri Volkov', 'subscribed', ['aud_power'], now - days(11)),
+    contact('lena.haas@fjordworks.com', 'Lena Haas', 'bounced', ['aud_winback'], now - days(9)),
+    contact('noah.bennett@kestrel.dev', 'Noah Bennett', 'subscribed', ['aud_trial'], now - days(6)),
+    contact('amelia.frost@oakbridge.co', 'Amelia Frost', 'subscribed', ['aud_active'], now - days(3)),
+  ];
+
+  return { mailboxes, audiences, templates, campaigns, activity, contacts };
+}
+
+let _ctSeq = 0;
+export function contact(email, name, status = 'subscribed', listIds = [], createdAt = Date.now()) {
+  return { id: `ct_${_boot}c${(_ctSeq++).toString(36)}`, email: email.trim(), name: name.trim(), status, listIds, createdAt };
+}
+
+// Default sending limits — surfaced and editable from the Settings view.
+export function defaultSettings() {
+  return {
+    globalDailyLimit: 50000, // max emails sent per day across all mailboxes
+    maxSendRate: 80, // hard cap on a campaign's per-batch send rate
+    perCampaignDailyLimit: 20000, // max emails a single campaign sends per day
+    enforceLimits: true, // master switch for limit enforcement
+  };
 }
 
 export function blankMetrics(recipients, over = {}) {

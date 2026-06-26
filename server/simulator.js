@@ -1,7 +1,7 @@
 // The dispatch engine. No real email leaves the building — instead we model
 // what a sending campaign *looks like* over time and stream it to clients:
 // packets onto the dispatch stream, metric deltas, and activity events.
-import { _state, broadcast, pushActivity, persistCampaign, persistMailbox } from './store.js';
+import { _state, broadcast, pushActivity, persistCampaign, persistMailbox, getSettings } from './store.js';
 
 const TICK_MS = 350;
 
@@ -21,7 +21,13 @@ export function startSimulator() {
 
 function tick() {
   const state = _state();
+  const settings = getSettings() || {};
+  const enforce = settings.enforceLimits !== false;
   const packets = [];
+
+  // Global volume ceiling — total sent across every mailbox today.
+  const globalSent = () => state.mailboxes.reduce((s, mb) => s + (mb.sentToday || 0), 0);
+  let globalHalted = false;
 
   for (const c of state.campaigns) {
     if (c.status !== 'sending') continue;
@@ -33,8 +39,40 @@ function tick() {
       continue;
     }
 
-    // Send a jittered batch sized by the campaign's send rate.
-    const batch = Math.max(1, Math.min(remaining, Math.round(c.sendRate * (0.6 + Math.random() * 0.9))));
+    // Per-campaign daily volume cap — pause the campaign once it's reached.
+    if (enforce && settings.perCampaignDailyLimit > 0 && m.sent >= settings.perCampaignDailyLimit) {
+      c.status = 'paused';
+      persistCampaign(c);
+      broadcast('campaign:update', c);
+      pushActivity(`${c.name} hit its per-campaign limit (${settings.perCampaignDailyLimit.toLocaleString()}) — paused`, 'warn');
+      continue;
+    }
+
+    // Global volume ceiling — stop sending for this tick once breached.
+    if (enforce && settings.globalDailyLimit > 0 && globalSent() >= settings.globalDailyLimit) {
+      if (!globalHalted) {
+        globalHalted = true;
+        if (!tick._globalNotified) {
+          tick._globalNotified = true;
+          pushActivity(`Global daily limit reached (${settings.globalDailyLimit.toLocaleString()}) — dispatch holding`, 'warn');
+        }
+      }
+      continue;
+    } else if (!globalHalted) {
+      tick._globalNotified = false;
+    }
+
+    // Send a jittered batch sized by the campaign's send rate, capped by the
+    // configured maximum send rate and any remaining limit headroom.
+    const rate = enforce && settings.maxSendRate > 0 ? Math.min(c.sendRate, settings.maxSendRate) : c.sendRate;
+    let batch = Math.max(1, Math.min(remaining, Math.round(rate * (0.6 + Math.random() * 0.9))));
+    if (enforce && settings.perCampaignDailyLimit > 0) {
+      batch = Math.min(batch, settings.perCampaignDailyLimit - m.sent);
+    }
+    if (enforce && settings.globalDailyLimit > 0) {
+      batch = Math.min(batch, settings.globalDailyLimit - globalSent());
+    }
+    if (batch <= 0) continue;
     let delivered = 0;
     let bounced = 0;
     let opened = 0;
