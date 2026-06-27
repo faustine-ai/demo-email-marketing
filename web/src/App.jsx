@@ -1,4 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
+import {
+  Routes, Route, Navigate, NavLink, Outlet, useNavigate, useLocation, useParams, useOutletContext,
+} from 'react-router-dom';
 import { useStore } from './lib/hooks.js';
 import { api, connect, logout as doLogout, fetchMe, getToken, setToken, disconnect, setUnauthorizedHandler } from './lib/store.js';
 import { clockTime } from './lib/format.js';
@@ -17,16 +20,16 @@ import Settings from './views/Settings.jsx';
 import Login from './views/Login.jsx';
 
 const NAV = [
-  { id: 'overview', label: 'Overview', icon: IconPulse },
-  { id: 'campaigns', label: 'Campaigns', icon: IconCampaign },
-  { id: 'mailboxes', label: 'Mailboxes', icon: IconMailbox },
-  { id: 'audiences', label: 'Audiences', icon: IconAudience },
-  { id: 'templates', label: 'Templates', icon: IconTemplate },
-  { id: 'settings', label: 'Settings', icon: IconSettings },
+  { id: 'overview', label: 'Overview', icon: IconPulse, to: '/', end: true },
+  { id: 'campaigns', label: 'Campaigns', icon: IconCampaign, to: '/campaigns' },
+  { id: 'mailboxes', label: 'Mailboxes', icon: IconMailbox, to: '/mailboxes' },
+  { id: 'audiences', label: 'Audiences', icon: IconAudience, to: '/audiences' },
+  { id: 'templates', label: 'Templates', icon: IconTemplate, to: '/templates' },
+  { id: 'settings', label: 'Settings', icon: IconSettings, to: '/settings' },
 ];
 
 export default function App() {
-  // auth: 'pending' until we know, then a user object or null.
+  // auth: 'undefined' until we know, then a user object or null.
   const [user, setUser] = useState(undefined);
 
   // On boot, validate any token already in sessionStorage.
@@ -63,14 +66,81 @@ export default function App() {
   }, []);
 
   if (user === undefined) return <div className="boot" />;
-  if (!user) return <Login onAuthed={onAuthed} />;
-  return <Console user={user} onLogout={() => { doLogout(); setUser(null); }} />;
+
+  return (
+    <Routes>
+      <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login onAuthed={onAuthed} />} />
+      <Route
+        element={
+          user ? (
+            <Console user={user} onLogout={() => { doLogout(); setUser(null); }} />
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
+      >
+        <Route index element={<OverviewRoute />} />
+        <Route path="overview" element={<Navigate to="/" replace />} />
+        <Route path="campaigns" element={<CampaignsRoute />} />
+        <Route path="campaigns/:id" element={<CampaignDetailRoute />} />
+        <Route path="mailboxes" element={<MailboxesRoute />} />
+        <Route path="audiences" element={<AudiencesRoute />} />
+        <Route path="templates" element={<TemplatesRoute />} />
+        <Route path="settings" element={<SettingsRoute />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  );
+}
+
+// ---- route elements: pull shared deps from the layout's Outlet context ----
+function OverviewRoute() {
+  const { store, openCampaign } = useOutletContext();
+  return <Overview store={store} onOpenCampaign={openCampaign} />;
+}
+function CampaignsRoute() {
+  const { store, toast, openNewCampaign } = useOutletContext();
+  const navigate = useNavigate();
+  return (
+    <Campaigns store={store} api={api} selectedId={null} onSelect={(id) => navigate(`/campaigns/${id}`)} onNew={openNewCampaign} toast={toast} />
+  );
+}
+function CampaignDetailRoute() {
+  const { store, toast, openNewCampaign } = useOutletContext();
+  const { id } = useParams();
+  const navigate = useNavigate();
+  return (
+    <Campaigns
+      store={store}
+      api={api}
+      selectedId={id}
+      onSelect={(v) => navigate(v ? `/campaigns/${v}` : '/campaigns')}
+      onNew={openNewCampaign}
+      toast={toast}
+    />
+  );
+}
+function MailboxesRoute() {
+  const { store, toast } = useOutletContext();
+  return <Mailboxes store={store} api={api} toast={toast} />;
+}
+function AudiencesRoute() {
+  const { store, toast } = useOutletContext();
+  return <Audiences store={store} api={api} toast={toast} />;
+}
+function TemplatesRoute() {
+  const { store, toast } = useOutletContext();
+  return <Templates store={store} api={api} toast={toast} />;
+}
+function SettingsRoute() {
+  const { store, toast } = useOutletContext();
+  return <Settings store={store} api={api} toast={toast} />;
 }
 
 function Console({ user, onLogout }) {
   const store = useStore();
-  const [route, setRoute] = useState('overview');
-  const [selectedCampaign, setSelectedCampaign] = useState(null);
+  const navigate = useNavigate();
+  const location = useLocation();
   const [drawer, setDrawer] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
@@ -88,16 +158,7 @@ function Console({ user, onLogout }) {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2600);
   }, []);
 
-  const go = (id) => {
-    setRoute(id);
-    setSelectedCampaign(null);
-    setRailOpen(false);
-  };
-
-  const openCampaign = (id) => {
-    setRoute('campaigns');
-    setSelectedCampaign(id);
-  };
+  const openCampaign = useCallback((id) => navigate(`/campaigns/${id}`), [navigate]);
 
   const counts = {
     campaigns: store.campaigns.length,
@@ -109,12 +170,15 @@ function Console({ user, onLogout }) {
   const sending = store.campaigns.filter((c) => c.status === 'sending');
   const liveRate = sending.reduce((s, c) => s + c.sendRate, 0) * 3;
 
-  const crumb =
-    route === 'campaigns' && selectedCampaign ? 'Campaigns / Detail' : NAV.find((n) => n.id === route)?.label;
+  // Page title / breadcrumb derived from the current URL.
+  const onCampaignDetail = /^\/campaigns\/[^/]+$/.test(location.pathname);
+  const navMatch = NAV.find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)));
+  const title = onCampaignDetail ? 'Campaign detail' : navMatch?.label || 'Overview';
+  const crumb = onCampaignDetail ? 'Campaigns / Detail' : navMatch?.label || 'Overview';
 
   return (
     <div className="app">
-      <Rail route={route} go={go} counts={counts} connection={store.connection} clients={store.clients} open={railOpen} user={user} onLogout={onLogout} />
+      <Rail counts={counts} connection={store.connection} clients={store.clients} open={railOpen} onNavigate={() => setRailOpen(false)} user={user} onLogout={onLogout} />
 
       <div className="main">
         <header className="topbar">
@@ -123,7 +187,7 @@ function Console({ user, onLogout }) {
           </button>
           <div>
             <span className="crumb">{crumb}</span>
-            <h1>{route === 'campaigns' && selectedCampaign ? 'Campaign detail' : NAV.find((n) => n.id === route)?.label}</h1>
+            <h1>{title}</h1>
           </div>
           <div className="spacer" />
           <Telemetry sending={sending.length} liveRate={liveRate} />
@@ -133,21 +197,7 @@ function Console({ user, onLogout }) {
         </header>
 
         <main className="view">
-          {route === 'overview' && <Overview store={store} onOpenCampaign={openCampaign} />}
-          {route === 'campaigns' && (
-            <Campaigns
-              store={store}
-              api={api}
-              selectedId={selectedCampaign}
-              onSelect={setSelectedCampaign}
-              onNew={() => setDrawer(true)}
-              toast={toast}
-            />
-          )}
-          {route === 'mailboxes' && <Mailboxes store={store} api={api} toast={toast} />}
-          {route === 'audiences' && <Audiences store={store} api={api} toast={toast} />}
-          {route === 'templates' && <Templates store={store} api={api} toast={toast} />}
-          {route === 'settings' && <Settings store={store} api={api} toast={toast} />}
+          <Outlet context={{ store, api, toast, openCampaign, openNewCampaign: () => setDrawer(true) }} />
         </main>
       </div>
 
@@ -176,7 +226,7 @@ function Console({ user, onLogout }) {
   );
 }
 
-function Rail({ route, go, counts, connection, clients, open, user, onLogout }) {
+function Rail({ counts, connection, clients, open, onNavigate, user, onLogout }) {
   const label = { open: 'Connected', connecting: 'Connecting…', closed: 'Reconnecting…' }[connection] || connection;
   return (
     <aside className={`rail${open ? ' open' : ''}`}>
@@ -196,11 +246,17 @@ function Rail({ route, go, counts, connection, clients, open, user, onLogout }) 
       {NAV.map((n) => {
         const Icon = n.icon;
         return (
-          <button key={n.id} className={`nav-item${route === n.id ? ' active' : ''}`} onClick={() => go(n.id)}>
+          <NavLink
+            key={n.id}
+            to={n.to}
+            end={n.end}
+            className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+            onClick={onNavigate}
+          >
             <Icon />
             {n.label}
             {counts[n.id] != null && <span className="count">{counts[n.id]}</span>}
-          </button>
+          </NavLink>
         );
       })}
 
